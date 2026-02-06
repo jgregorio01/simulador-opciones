@@ -7,7 +7,7 @@ import yfinance as yf
 from datetime import date, timedelta
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
-st.set_page_config(layout="wide", page_title="Simulador de Opciones Pro v2")
+st.set_page_config(layout="wide", page_title="Simulador de Opciones Pro v3")
 
 # --- LÓGICA MATEMÁTICA (BLACK-SCHOLES) ---
 class OptionPricing:
@@ -49,12 +49,11 @@ class OptionPricing:
         
         return {"Delta": delta, "Gamma": gamma, "Theta": theta, "Vega": vega, "Rho": rho}
 
-# --- SIDEBAR: DATOS DEL MERCADO ---
+# --- SIDEBAR ---
 st.sidebar.header("🔍 Datos del Mercado")
 
-# 1. Buscador de Ticker
-ticker = st.sidebar.text_input("Ticker (Ej: AAPL, TSLA, SPY)", value="").upper()
-current_price = 100.0 # Precio por defecto
+ticker = st.sidebar.text_input("Ticker (Ej: AAPL, TSLA)", value="").upper()
+current_price = 100.0
 
 if ticker:
     try:
@@ -69,28 +68,24 @@ if ticker:
     except:
         st.sidebar.error("Error al buscar el ticker.")
 
-# Input de Precio (se actualiza si encontramos el ticker, pero el usuario puede editarlo)
 S = st.sidebar.number_input("Precio Subyacente ($)", value=float(current_price), step=0.5)
 
 st.sidebar.markdown("---")
-st.sidebar.header("⚙️ Configuración del Contrato")
+st.sidebar.header("⚙️ Configuración")
 
 option_type = st.sidebar.selectbox("Tipo de Opción", ["Call", "Put"])
 K = st.sidebar.number_input("Strike Price ($)", value=S * 1.05, step=0.5)
 
-# Fecha
 today = date.today()
 expiry_date = st.sidebar.date_input("Fecha de Expiración", value=today + timedelta(days=30), min_value=today + timedelta(days=1), max_value=date(2030, 12, 31))
 T_days = (expiry_date - today).days
 
-# 2. CAMBIO SOLICITADO: IV manual (Number Input en vez de Slider)
-IV = st.sidebar.number_input("Volatilidad Implícita (IV %)", value=20.0, min_value=1.0, step=0.5, help="Escribe el valor manual.")
-
+IV = st.sidebar.number_input("Volatilidad Implícita (IV %)", value=20.0, min_value=1.0, step=0.5)
 r_percent = st.sidebar.number_input("Tasa Libre de Riesgo (%)", value=4.5, step=0.1)
 contracts = st.sidebar.number_input("Cantidad de Contratos", value=1, min_value=1)
 premium_paid = st.sidebar.number_input("Prima Pagada por Acción ($)", value=0.0, step=0.01)
 
-# --- CÁLCULOS ---
+# --- CÁLCULOS BASE ---
 model = OptionPricing(S, K, T_days, r_percent/100, IV/100, option_type)
 theo_price = model.price()
 greeks = model.greeks()
@@ -99,25 +94,22 @@ entry_price = premium_paid if premium_paid > 0 else theo_price
 total_cost = entry_price * 100 * contracts
 breakeven = K + entry_price if option_type == "Call" else K - entry_price
 
-# --- VISUALIZACIÓN ---
+# --- TÍTULO ---
 st.title(f"Simulador: {ticker if ticker else 'Personalizado'} {option_type} @ ${K}")
 
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Precio Opción (Teórico)", f"${theo_price:.2f}")
+col1.metric("Precio Opción", f"${theo_price:.2f}")
 col2.metric("Breakeven", f"${breakeven:.2f}")
 col3.metric("Días al Vencimiento", f"{T_days}")
 col4.metric("Inversión Total", f"${total_cost:.2f}")
 
-# --- SECCIÓN DE ESCENARIOS (NUEVO) ---
+# --- CALCULADORA TARGET ---
 st.markdown("---")
-st.subheader("🎯 Calculadora de Retorno Objetivo")
-
-# Inputs para el objetivo
+st.subheader("🎯 Calculadora de Retorno")
 sc_col1, sc_col2 = st.columns([1, 2])
 with sc_col1:
-    target_price = st.number_input("Price Target de la Acción ($)", value=breakeven * 1.05, step=0.5)
+    target_price = st.number_input("Price Target ($)", value=breakeven * 1.05, step=0.5)
 
-# Cálculos del escenario al vencimiento
 if option_type == "Call":
     value_at_target = max(0, target_price - K)
 else:
@@ -125,74 +117,91 @@ else:
 
 profit_at_target = (value_at_target - entry_price) * 100 * contracts
 roi = (profit_at_target / total_cost) * 100 if total_cost > 0 else 0
-premium_pct_spot = (entry_price / S) * 100 # % Pagado sobre la prima (relativo al precio acción)
+premium_pct_spot = (entry_price / S) * 100
 
-# Tabla de Resultados
 with sc_col2:
-    st.write("#### Resultados al Vencimiento si llega al Target:")
-    
-    # Creamos un DataFrame para mostrarlo como tabla bonita
+    st.write("#### Resultados en el Target (al Vencimiento):")
     df_results = pd.DataFrame({
-        "Métrica": [
-            "Precio Objetivo (Target)", 
-            "Inversión Total Realizada", 
-            "% Prima sobre Precio Acción", 
-            "Valor de Salida (Venta)",
-            "Ganancia Neta Estimada", 
-            "% Retorno (ROI)"
-        ],
-        "Valor": [
-            f"${target_price:.2f}",
-            f"${total_cost:.2f}",
-            f"{premium_pct_spot:.2f}%",
-            f"${value_at_target * 100 * contracts:.2f}",
-            f"${profit_at_target:.2f}",
-            f"{roi:.2f}%"
-        ]
+        "Métrica": ["Inversión", "% Prima/Acción", "Ganancia Neta", "% Retorno (ROI)"],
+        "Valor": [f"${total_cost:.2f}", f"{premium_pct_spot:.2f}%", f"${profit_at_target:.2f}", f"{roi:.2f}%"]
     })
-    
-    # Estilizar la tabla: Si ROI es positivo verde, si negativo rojo
-    def color_roi(val):
-        color = 'green' if profit_at_target > 0 else 'red'
-        return f'color: {color}; font-weight: bold'
-
     st.dataframe(df_results, use_container_width=True, hide_index=True)
-    
-    if profit_at_target > 0:
-        st.success(f"🚀 ¡Potencial de ganancia del {roi:.1f}%!")
-    else:
-        st.error(f"⚠️ Pérdida estimada del {roi:.1f}% si expira en ese precio.")
 
-# --- GRIEGAS Y GRÁFICOS ---
+# --- NUEVA SECCIÓN: MÁQUINA DEL TIEMPO ---
 st.markdown("---")
-st.subheader("🧩 Griegas y Gráficos")
+st.subheader("⏳ Máquina del Tiempo: Efecto Theta")
+st.markdown("Mueve el deslizador para **avanzar días en el futuro** y ver cómo se 'desinfla' tu contrato si el precio no se mueve.")
+
+# Deslizador de tiempo
+days_passed = st.slider("Simular paso de días (Días transcurridos desde hoy)", 0, T_days - 1, 0)
+days_remaining_sim = T_days - days_passed
+
+# Cálculo del escenario Futuro (Manteniendo S e IV constantes)
+model_future = OptionPricing(S, K, days_remaining_sim, r_percent/100, IV/100, option_type)
+future_price = model_future.price()
+future_greeks = model_future.greeks()
+future_pnl = (future_price - entry_price) * 100 * contracts
+
+# Métricas comparativas
+t_col1, t_col2, t_col3, t_col4 = st.columns(4)
+t_col1.metric("Fecha Simulada", f"En {days_passed} días", help=f"Quedarán {days_remaining_sim} días para vencer.")
+t_col2.metric("Valor del Contrato", f"${future_price:.2f}", delta=f"{future_price - theo_price:.2f}")
+t_col3.metric("P&L Latente", f"${future_pnl:.2f}", delta_color="normal" if future_pnl > 0 else "inverse")
+t_col4.metric("Nuevo Theta", f"{future_greeks['Theta']:.3f}", help="El Theta suele aumentar (se vuelve más negativo) al acercarse el final.")
+
+# --- GRÁFICA COMPARATIVA (HOY vs FUTURO) ---
+spot_range = np.linspace(S * 0.7, S * 1.3, 100)
+
+# Curva HOY (T original)
+pnl_today = []
+# Curva FUTURA (T simulado)
+pnl_future_curve = []
+
+for spot in spot_range:
+    # Precio HOY
+    p_today = OptionPricing(spot, K, T_days, r_percent/100, IV/100, option_type).price()
+    pnl_today.append((p_today - entry_price) * 100 * contracts)
+    
+    # Precio FUTURO
+    p_future = OptionPricing(spot, K, days_remaining_sim, r_percent/100, IV/100, option_type).price()
+    pnl_future_curve.append((p_future - entry_price) * 100 * contracts)
+
+fig_time = go.Figure()
+
+# Línea Verde: HOY
+fig_time.add_trace(go.Scatter(
+    x=spot_range, y=pnl_today, 
+    mode='lines', name='Curva P&L HOY', 
+    line=dict(color='green', width=2, dash='dot')
+))
+
+# Línea Naranja: FUTURO
+fig_time.add_trace(go.Scatter(
+    x=spot_range, y=pnl_future_curve, 
+    mode='lines', name=f'Curva P&L en {days_passed} días', 
+    line=dict(color='orange', width=4)
+))
+
+# Puntos de referencia
+fig_time.add_vline(x=S, line_dash="dash", line_color="blue", annotation_text="Precio Actual")
+fig_time.add_vline(x=breakeven, line_dash="dot", line_color="red", annotation_text="Breakeven")
+fig_time.add_hline(y=0, line_color="white", opacity=0.3)
+
+fig_time.update_layout(
+    title=f"Impacto del Tiempo: Hoy vs Futuro (Día {days_passed})",
+    xaxis_title="Precio de la Acción",
+    yaxis_title="Ganancia / Pérdida ($)",
+    hovermode="x unified"
+)
+
+st.plotly_chart(fig_time, use_container_width=True)
+st.caption("Nota: La línea naranja muestra cuánto valdrá tu posición en el futuro para diferentes precios de la acción. Observa cómo la curva 'baja' debido al Time Decay.")
+
+# --- SECCIÓN EXTRA: GRIEGAS ESTÁTICAS ---
+st.markdown("---")
+st.subheader("🧩 Panel de Griegas (Hoy)")
 g_col1, g_col2, g_col3, g_col4 = st.columns(4)
 g_col1.metric("Delta", f"{greeks['Delta']:.3f}")
 g_col2.metric("Theta", f"{greeks['Theta']:.3f}")
 g_col3.metric("Vega", f"{greeks['Vega']:.3f}")
 g_col4.metric("Gamma", f"{greeks['Gamma']:.3f}")
-
-tab1, tab2 = st.tabs(["Curva de P&L", "Sensibilidad IV"])
-
-with tab1:
-    spot_range = np.linspace(S * 0.7, S * 1.3, 100)
-    pnl_expiry = []
-    for spot in spot_range:
-        val = max(0, spot - K) if option_type == "Call" else max(0, K - spot)
-        pnl_expiry.append((val - entry_price) * 100 * contracts)
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=spot_range, y=pnl_expiry, name='P&L Expiración', line=dict(color='green', width=3)))
-    fig.add_vline(x=target_price, line_dash="dash", line_color="purple", annotation_text="Target")
-    fig.add_vline(x=breakeven, line_dash="dot", line_color="red", annotation_text="Breakeven")
-    fig.add_hline(y=0, line_color="white", opacity=0.3)
-    fig.update_layout(title="Ganancia/Pérdida al Vencimiento", xaxis_title="Precio Acción", yaxis_title="P&L ($)")
-    st.plotly_chart(fig, use_container_width=True)
-
-with tab2:
-    vol_range = np.linspace(1, 200, 50)
-    vega_prices = [OptionPricing(S, K, T_days, r_percent/100, v/100, option_type).price() for v in vol_range]
-    fig_v = go.Figure()
-    fig_v.add_trace(go.Scatter(x=vol_range, y=vega_prices, name='Precio vs IV'))
-    fig_v.add_vline(x=IV, line_dash="dash", line_color="orange", annotation_text="IV Actual")
-    st.plotly_chart(fig_v, use_container_width=True)
