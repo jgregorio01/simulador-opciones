@@ -7,7 +7,7 @@ import yfinance as yf
 from datetime import date, timedelta
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
-st.set_page_config(layout="wide", page_title="Simulador de Opciones Pro v3")
+st.set_page_config(layout="wide", page_title="Simulador de Opciones Pro v4")
 
 # --- LÓGICA MATEMÁTICA (BLACK-SCHOLES) ---
 class OptionPricing:
@@ -127,7 +127,25 @@ with sc_col2:
     })
     st.dataframe(df_results, use_container_width=True, hide_index=True)
 
-# --- NUEVA SECCIÓN: MÁQUINA DEL TIEMPO ---
+# --- SECCIÓN DE GRIEGAS (AHORA ARRIBA Y CON DEFINICIONES) ---
+st.markdown("---")
+st.subheader("🧩 Panel de Griegas (Hoy)")
+
+# Definiciones para los tooltips
+help_delta = "Delta: Cuánto cambia el precio de la opción si la acción sube $1. También representa la probabilidad aproximada de que la opción expire 'In The Money'."
+help_gamma = "Gamma: La aceleración del Delta. Mide cuánto cambiará el Delta si la acción se mueve $1 más."
+help_theta = "Theta (Time Decay): Cuánto dinero pierde tu opción CADA DÍA que pasa, asumiendo que el precio de la acción no cambia."
+help_vega = "Vega: Cuánto cambia el precio de la opción si la Volatilidad Implícita sube un 1%."
+help_rho = "Rho: Cuánto cambia el precio si la tasa de interés libre de riesgo cambia un 1%."
+
+g_col1, g_col2, g_col3, g_col4, g_col5 = st.columns(5)
+g_col1.metric("Delta", f"{greeks['Delta']:.3f}", help=help_delta)
+g_col2.metric("Gamma", f"{greeks['Gamma']:.3f}", help=help_gamma)
+g_col3.metric("Theta", f"{greeks['Theta']:.3f}", help=help_theta)
+g_col4.metric("Vega", f"{greeks['Vega']:.3f}", help=help_vega)
+g_col5.metric("Rho", f"{greeks['Rho']:.3f}", help=help_rho)
+
+# --- MÁQUINA DEL TIEMPO (AHORA ABAJO) ---
 st.markdown("---")
 st.subheader("⏳ Máquina del Tiempo: Efecto Theta")
 st.markdown("Mueve el deslizador para **avanzar días en el futuro** y ver cómo se 'desinfla' tu contrato si el precio no se mueve.")
@@ -149,40 +167,33 @@ t_col2.metric("Valor del Contrato", f"${future_price:.2f}", delta=f"{future_pric
 t_col3.metric("P&L Latente", f"${future_pnl:.2f}", delta_color="normal" if future_pnl > 0 else "inverse")
 t_col4.metric("Nuevo Theta", f"{future_greeks['Theta']:.3f}", help="El Theta suele aumentar (se vuelve más negativo) al acercarse el final.")
 
-# --- GRÁFICA COMPARATIVA (HOY vs FUTURO) ---
+# --- GRÁFICA COMPARATIVA ---
 spot_range = np.linspace(S * 0.7, S * 1.3, 100)
 
-# Curva HOY (T original)
 pnl_today = []
-# Curva FUTURA (T simulado)
 pnl_future_curve = []
 
 for spot in spot_range:
-    # Precio HOY
     p_today = OptionPricing(spot, K, T_days, r_percent/100, IV/100, option_type).price()
     pnl_today.append((p_today - entry_price) * 100 * contracts)
     
-    # Precio FUTURO
     p_future = OptionPricing(spot, K, days_remaining_sim, r_percent/100, IV/100, option_type).price()
     pnl_future_curve.append((p_future - entry_price) * 100 * contracts)
 
 fig_time = go.Figure()
 
-# Línea Verde: HOY
 fig_time.add_trace(go.Scatter(
     x=spot_range, y=pnl_today, 
     mode='lines', name='Curva P&L HOY', 
     line=dict(color='green', width=2, dash='dot')
 ))
 
-# Línea Naranja: FUTURO
 fig_time.add_trace(go.Scatter(
     x=spot_range, y=pnl_future_curve, 
     mode='lines', name=f'Curva P&L en {days_passed} días', 
     line=dict(color='orange', width=4)
 ))
 
-# Puntos de referencia
 fig_time.add_vline(x=S, line_dash="dash", line_color="blue", annotation_text="Precio Actual")
 fig_time.add_vline(x=breakeven, line_dash="dot", line_color="red", annotation_text="Breakeven")
 fig_time.add_hline(y=0, line_color="white", opacity=0.3)
@@ -195,13 +206,3 @@ fig_time.update_layout(
 )
 
 st.plotly_chart(fig_time, use_container_width=True)
-st.caption("Nota: La línea naranja muestra cuánto valdrá tu posición en el futuro para diferentes precios de la acción. Observa cómo la curva 'baja' debido al Time Decay.")
-
-# --- SECCIÓN EXTRA: GRIEGAS ESTÁTICAS ---
-st.markdown("---")
-st.subheader("🧩 Panel de Griegas (Hoy)")
-g_col1, g_col2, g_col3, g_col4 = st.columns(4)
-g_col1.metric("Delta", f"{greeks['Delta']:.3f}")
-g_col2.metric("Theta", f"{greeks['Theta']:.3f}")
-g_col3.metric("Vega", f"{greeks['Vega']:.3f}")
-g_col4.metric("Gamma", f"{greeks['Gamma']:.3f}")
